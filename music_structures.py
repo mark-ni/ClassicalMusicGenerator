@@ -15,7 +15,8 @@ class Note:
     def __gt__(self, other):
         return self.keyid > other.keyid
 
-    def findKeyID(self, key):
+    @staticmethod
+    def findKeyID(key):
         if key == 'r':
             return 100
         is_a_b = int(key[0] not in ['A', 'B'])
@@ -106,7 +107,6 @@ class ChordFamily:
         self.base = self.setBaseChordVals()
 
     def setBaseChordVals(self):
-        li = 0
         if self.quality == 'MAJOR':
             li = [0, 4, 7]
         elif self.quality == 'MINOR':
@@ -143,7 +143,6 @@ class ChordFamily:
 
         rel = (ord(self.keyNoOct[0]) - ord(self.baseKeyNoOct[0])) % 7 + 1
         return Chord(self.quality, rel, inversion, self.base, masterKey)
-
 
     @staticmethod
     def getIntervals(quality):
