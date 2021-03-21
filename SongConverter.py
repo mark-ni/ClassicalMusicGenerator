@@ -9,10 +9,10 @@ class SongConverter:
         self.beatTime = round(15000 / self.tempo)
 
     def getSound(self, note):
-        if note.key == 'r':
+        if note.noteLong == 'r':
             return AudioSegment.silent(self.beatTime)
         try:
-            return AudioSegment.from_wav("samples/" + note.key + ".wav")[:note.duration * self.beatTime]
+            return AudioSegment.from_wav("samples/" + note.noteLong + ".wav")[:note.duration * self.beatTime]
         except FileNotFoundError:
             return AudioSegment.silent(self.beatTime * note.duration)
 

@@ -1,0 +1,6 @@
+
+Project Level TODOs
+- Find samples for D#3, F#2, F#4, G2
+- Test out viability of splitting up the music_structures file into 3 parts and maybe a folder
+- Eventually split up Score file. If there's a way to put harmonization and melody generation
+in separate classes, then do that.

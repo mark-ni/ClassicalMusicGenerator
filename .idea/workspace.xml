@@ -88,6 +88,7 @@
     <servers />
   </component>
   <component name="Vcs.Log.Tabs.Properties">
+<<<<<<< Updated upstream
     <option name="TAB_STATES">
       <map>
         <entry key="MAIN">
@@ -97,6 +98,8 @@
         </entry>
       </map>
     </option>
+=======
+>>>>>>> Stashed changes
     <option name="oldMeFiltersMigrated" value="true" />
   </component>
 </project>
