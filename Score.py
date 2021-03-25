@@ -1,6 +1,7 @@
 from sys import stdout
 from music_structures import *
 from heapq import heappush
+from collections import defaultdict
 
 MELODY_LINE = 0
 # TODO: Make sure rest of project matches up with BASS_LINE implementation
@@ -11,6 +12,15 @@ BASS_HIGH = Note.getIdLong('C4')
 TREBLE_LOW = Note.getIdLong('C2')
 TREBLE_HIGH = Note.getIdLong('C4')
 
+# Interval constants
+P8, m2, M2, m3, M3, P4, TRITONE, P5, m6, M6, m7, M7 = map(int, range(12))
+
+# Hardcoded valid major chord progressions (key = previous chord, value = set of current chords)
+# TODO: CREATE THE SET OF VIABLE PROGRESSIONS - IGNORE INVERSIONS FOR NOW?
+MAJOR_PROGRESSIONS = [defaultdict() for i in range(1 + Chord.getHash(7, 3, True))]
+
+# for i in range(3):
+#    MAJOR_PROGRESSIONS[Chord.getHash(1, i)] = {Chord.getHash()}
 
 class Score:
 
@@ -29,12 +39,16 @@ class Score:
         self.chordBank = [list() for _ in range(LENGTH * 4)]
 
         # TODO: replace the 0 with a null or default chord value
-        self.chords = [0 for _ in range(LENGTH * 4)]
+        self.chords = [Chord(KEY[1], 1, [0, 4, 7], KEY) for _ in range(LENGTH * 4)]
 
         # Records the highest number of used channels at any given point to optimize
         # extraction of wav file at the end
         # Probably not needed lol
         self.maxUsedChannels = 0
+
+        self.bassDisjunctMotion = 0
+
+        print("Finished construction of Score")
 
     def add_note(self, noteLong, duration, time, measure):
         channel = 0
@@ -57,7 +71,7 @@ class Score:
         what is being played."""
         points = 0
         for noteShort in noteShortsStrong:
-            if noteShort in chordFam.base:
+            if (noteShort - self.KEY_NOTE_ID_SHORT) % 12 in chordFam.baseRelNotes:
                 points -= 200
         return points
 
@@ -72,20 +86,74 @@ class Score:
             - The higher the number of the last x disjunct movements, the worse the
             score awarded for disjunct motion
                 - Can apply this concept later to add 8th notes and stuff
-        - 5. Give points for cadences in the right place
-            - Cadences considered:
+        - 5. Award points for good transitions of chords (such as V-I on the last measure),
+            deduct points for bad ones (such as vii-iii).
+        - 6. Make sure the piece ends with a V or a I
         """
-        # 1
+        points = 0
+        # Handle special case: beat = 0
+        # Must be tonic / 0th inv
+        # If treble note is not in tonic, then subdominant/dominant 0th inv
+        if beat == 0:
+            if chord.inversion == 0 and not chord.seventh:
+                if chord.rel == 1:
+                    return 1000
+                elif chord.rel == 5:
+                    return 200
+                elif chord.rel == 4:
+                    return 200
+            return 0
 
-        # 2
+        # Rule 1: NO PARALLEL INTERVALS
+        lastTrebleNote = self.score[beat * 4 - 1][MELODY_LINE].noteIdLong
+        lastBassNote = self.score[beat * 4 - 1][BASS_LINE].noteIdLong
+        currTrebleNote = self.score[beat * 4][MELODY_LINE].noteIdLong
 
-        # 3
+        if lastTrebleNote != 100 and currTrebleNote != 100:
+            if lastTrebleNote - lastBassNote == currTrebleNote - noteIdLong:
+                if (lastTrebleNote - lastBassNote) % 12 in (P8, TRITONE):
+                    if lastTrebleNote != currTrebleNote:
+                        return 0
 
-        # 4
+        # Rule 2: NO BASS INTERVALS > a 5th
+        if abs(noteIdLong - lastBassNote) > P5 or abs(noteIdLong - lastBassNote) == TRITONE:
+            return 0
+        # Rule 3: Contrary motion is good!
+        if lastTrebleNote < currTrebleNote and noteIdLong < lastBassNote \
+                or lastTrebleNote > currTrebleNote and noteIdLong > lastBassNote:
+            points += 100
 
-        # 5
+        # Rule 4: Promote disjunct motion!
+        # Idea is self.bassDisjunctMotion stores an integer value: the higher it is,
+        # the more disjunct motion there has been recently. This score will be inversely
+        # proportional to how much we want disjunct motion.
+        if abs(noteIdLong - lastBassNote) >= 2:
+            points += (-50) * self.bassDisjunctMotion
+            self.bassDisjunctMotion += abs(noteIdLong - lastBassNote)
+        else:
+            points += 50 * self.bassDisjunctMotion
+            self.bassDisjunctMotion -= 1
 
-        return 0
+        # Rule 5: Give a lot of points for good chord progression!
+        lastChord = self.chords[beat - 1]
+        points += 200 * MAJOR_PROGRESSIONS[lastChord.hash()].get(chord.hash(), 0)
+
+        # Rule 6: End on a good note!
+        currTrebleDuration = self.score[beat][MELODY_LINE].duration
+        timeLeft = (self.LENGTH * 4 - beat) * 4
+        if currTrebleDuration == timeLeft:
+            if chord.rel == 1:
+                points += 2000
+            elif chord.rel == 5 and self.chords[beat - 1].rel == 1:
+                points += 1000
+
+        # Sub rule for 6: don't use certain chords in the last 2 measures to
+        # simplify the progressions available
+        if beat >= self.LENGTH * 4 - 6:
+            if chord.rel not in (1, 4, 5):
+                points -= 500
+
+        return points
 
     def generateChordSet(self):
         """Gives the set of usable chords based on the quality of the piece (Major / minor).
@@ -121,18 +189,18 @@ class Score:
             strongNotes = self.getStrongNotes(beat)
 
             if len(strongNotes) > 0:
-                baseNoteIdShort = (min(strongNotes).noteIdShort - self.KEY_NOTE_ID_SHORT) % 12
+                baseNoteIdShort = min(strongNotes).noteIdShort
             else:
                 continue
 
-            strongNoteShorts = set([(note.noteIdShort - self.KEY_NOTE_ID_SHORT) % 12 for note in strongNotes])
+            strongNoteShorts = set([note.noteIdShort for note in strongNotes])
 
             # Search all chord families for possible matches and add possible chords to
             # The list of chords
             chords = []
             for chordFam in self.chordSet.values():
                 # The more points, the worse
-                if baseNoteIdShort not in chordFam.base:
+                if (baseNoteIdShort - self.KEY_NOTE_ID_SHORT) % 12 not in chordFam.baseRelNotes:
                     continue
                 points = self.assessFitChord(chordFam, strongNoteShorts)
 
@@ -148,6 +216,7 @@ class Score:
             else:
                 print("UNRECOGNIZED NOTE")
                 quit()
+        print("Finished chord bank generation")
 
     # Reserved for future implementation of checking notes on all parts of the beat
     #
@@ -226,8 +295,10 @@ class Score:
             soprano = strongNotes.pop()
             if len(strongNotes) == 0:
                 for chord in self.chordBank[beat]:
-                    for noteIdShort in chord.notes:
+                    for relNoteIdShort in chord.relNotes:
+                        noteIdShort = (relNoteIdShort + self.KEY_NOTE_ID_SHORT) % 12
                         for noteIdLong in self.getPossibleBassNotes(noteIdShort, beat):
+                            chord.setBaseNote(noteIdLong % 12)
                             points = self.assessFitBassNote(beat, chord, noteIdLong)
                             if points >= mostPoints:
                                 mostPoints = points
@@ -278,3 +349,4 @@ class Score:
                 self.add_note('B3', 4, 4, i)
                 self.add_note('A3', 4, 8, i)
                 self.add_note('G3', 4, 12, i)
+        print("Finished writing of sample")

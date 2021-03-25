@@ -25,7 +25,7 @@ class Note:
         else:
             self.noteShort = 'r'
             self.noteIDLong = 100
-            self.noteIDShort = 'this is a rest'
+            self.noteIDShort = 100
 
         self.duration = duration
         self.fresh = fresh
@@ -62,20 +62,21 @@ class Note:
 
 
 class Chord:
-
     roman = {1: 'i', 2: 'ii', 3: 'iii', 4: 'iv', 5: 'v', 6: 'vi', 7: 'vii'}
     inversion5 = {0: '', 1: '6', 2: '6-4'}
     inversion7 = {0: '7', 1: '6-5', 2: '4-3', 3: '4-2'}
 
-    def __init__(self, quality, rel, inversion, notes, key):
+    def __init__(self, quality, rel, relNotes, key):
         self.quality = quality
         self.rel = rel
-        self.inversion = inversion
-        self.notes = notes
+        self.relNotes = relNotes
         self.key = key
+        self.baseNoteIdShort = 100
+
+        self.inversion = 0
 
         self.seventh = False
-        if len(notes) == 4:
+        if len(relNotes) == 4:
             self.seventh = True
 
         self.child = 'i'
@@ -89,8 +90,21 @@ class Chord:
     #
     # Specific implementation:
     # In general, 3-note chords are more flexible and viable than 4-note chords so they are preferred
+
     def __lt__(self, other):
-        return len(self.notes) < len(other.notes)
+        return len(self.relNotes) < len(other.relNotes)
+
+    def setBaseNote(self, noteIdShort):
+        noteIdShort = (noteIdShort - Note.getIdShort(self.key[0])) % 12
+        inversion = 0
+        while inversion < len(self.relNotes) and noteIdShort != self.relNotes[inversion]:
+            inversion += 1
+        if inversion == len(self.relNotes):
+            print(str(noteIdShort), str(self.relNotes))
+            print("Chord.setBaseNote: DID NOT FIND INVERSION FOR CHORD")
+            quit()
+        self.inversion = inversion
+        self.baseNoteIdShort = noteIdShort
 
     def setChild(self):
         if self.quality in ['MAJOR', 'MAJOR_SEVENTH', 'SEVENTH', 'AUGMENTED']:
@@ -129,52 +143,58 @@ class Chord:
 
         return string
 
+    def hash(self):
+        '''Hashes the chord to later be accessible by a 2D array containing
+        valid chord progressions'''
+        return Chord.getHash(self.rel, self.inversion, len(self.relNotes) == 4)
+
+    @staticmethod
+    def getHash(rel, inversion, seventh=False):
+        if not seventh:
+            return (rel - 1) * 3 + inversion
+        else:
+            return 18 + (rel - 1) * 4 + inversion
+
 
 class ChordFamily:
     def __init__(self, noteShort, quality, key):
         self.noteShort = noteShort
         self.quality = quality
         self.key = key
-        self.base = self.setBaseChordVals()
+        self.baseRelNotes = self.setBaseChordVals()
 
     def setBaseChordVals(self):
         if self.quality == 'MAJOR':
-            li = [0, 4, 7]
+            relNotes = [0, 4, 7]
         elif self.quality == 'MINOR':
-            li = [0, 3, 7]
+            relNotes = [0, 3, 7]
         elif self.quality == 'DIMINISHED':
-            li = [0, 3, 6]
+            relNotes = [0, 3, 6]
         elif self.quality == 'AUGMENTED':
-            li = [0, 4, 8]
+            relNotes = [0, 4, 8]
         elif self.quality == 'DIMINISHED_SEVENTH':
-            li = [0, 3, 6, 9]
+            relNotes = [0, 3, 6, 9]
         elif self.quality == 'MINOR_SEVENTH':
-            li = [0, 3, 7, 10]
+            relNotes = [0, 3, 7, 10]
         elif self.quality == 'SEVENTH':
-            li = [0, 4, 7, 10]
+            relNotes = [0, 4, 7, 10]
         elif self.quality == 'MAJOR_SEVENTH':
-            li = [0, 4, 7, 11]
+            relNotes = [0, 4, 7, 11]
         else:
             print("Key: ", str(self.key), "quality: ", self.quality)
             print("CHORD SET NOT FOUND")
             return -1
         gap = (Note.getIdShort(self.noteShort) - Note.getIdShort(self.key[0])) % 12
 
-        for i in range(len(li)):
-            li[i] = (li[i] + gap) % 12
-        return li
+        for i in range(len(relNotes)):
+            relNotes[i] = (relNotes[i] + gap) % 12
+        return relNotes
 
     def getChord(self, baseNoteIdShort):
-        inversion = 0
-        while inversion < len(self.base) and baseNoteIdShort != self.base[inversion]:
-            inversion += 1
-
-        if inversion == len(self.base):
-            print("ERROR WITH CHORD FAMILY", self.noteShort, self.quality, self.key[0])
-            quit()
-
         rel = (ord(self.noteShort) - ord(self.key[0])) % 7 + 1
-        return Chord(self.quality, rel, inversion, self.base, self.key)
+        chord = Chord(self.quality, rel, self.baseRelNotes, self.key)
+        chord.setBaseNote(baseNoteIdShort)
+        return chord
 
     @staticmethod
     def getIntervals(quality):
