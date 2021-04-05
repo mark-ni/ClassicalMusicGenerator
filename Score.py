@@ -19,6 +19,7 @@ P8, m2, M2, m3, M3, P4, TRITONE, P5, m6, M6, m7, M7 = map(int, range(12))
 # TODO: CREATE THE SET OF VIABLE PROGRESSIONS - IGNORE INVERSIONS FOR NOW?
 MAJOR_PROGRESSIONS = [defaultdict() for i in range(1 + Chord.getHash(7, 3, True))]
 
+
 # for i in range(3):
 #    MAJOR_PROGRESSIONS[Chord.getHash(1, i)] = {Chord.getHash()}
 
@@ -29,6 +30,7 @@ class Score:
 
         # Just a safeguard!
         if LENGTH > 32:
+            print("The song is too long!")
             quit()
 
         self.MAX_KEYS = MAX_KEYS
@@ -89,8 +91,12 @@ class Score:
         - 5. Award points for good transitions of chords (such as V-I on the last measure),
             deduct points for bad ones (such as vii-iii).
         - 6. Make sure the piece ends with a V or a I
+        - 7. Try to avoid using 7ths if possible
+        - 8. Treble and Bass never cross
         """
-        points = 0
+        chord.setBaseNote(noteIdLong % 12)
+
+        points = 500
         # Handle special case: beat = 0
         # Must be tonic / 0th inv
         # If treble note is not in tonic, then subdominant/dominant 0th inv
@@ -121,28 +127,29 @@ class Score:
         # Rule 3: Contrary motion is good!
         if lastTrebleNote < currTrebleNote and noteIdLong < lastBassNote \
                 or lastTrebleNote > currTrebleNote and noteIdLong > lastBassNote:
+            points += 40
+        elif lastTrebleNote == currTrebleNote and lastBassNote == noteIdLong:
             points += 100
 
         # Rule 4: Promote disjunct motion!
         # Idea is self.bassDisjunctMotion stores an integer value: the higher it is,
         # the more disjunct motion there has been recently. This score will be inversely
         # proportional to how much we want disjunct motion.
-        if abs(noteIdLong - lastBassNote) >= 2:
-            points += (-50) * self.bassDisjunctMotion
-            self.bassDisjunctMotion += abs(noteIdLong - lastBassNote)
-        else:
-            points += 50 * self.bassDisjunctMotion
-            self.bassDisjunctMotion -= 1
+        if abs(noteIdLong - lastBassNote) >= 3:
+            points += (-10) * (self.bassDisjunctMotion + (abs(noteIdLong - lastBassNote)))
+        elif abs(noteIdLong - lastBassNote) in (1, 2):
+            points += 10 * (self.bassDisjunctMotion - 2)
 
         # Rule 5: Give a lot of points for good chord progression!
         lastChord = self.chords[beat - 1]
-        points += 200 * MAJOR_PROGRESSIONS[lastChord.hash()].get(chord.hash(), 0)
+        # points += 200 * MAJOR_PROGRESSIONS[lastChord.hash()].get(chord.hash(), 0)
 
         # Rule 6: End on a good note!
-        currTrebleDuration = self.score[beat][MELODY_LINE].duration
-        timeLeft = (self.LENGTH * 4 - beat) * 4
-        if currTrebleDuration == timeLeft:
-            if chord.rel == 1:
+        currTrebleDuration = self.score[beat * 4][MELODY_LINE].duration
+        # print(currTrebleDuration)
+        timeLeft = (self.LENGTH * 4 - beat)
+        if currTrebleDuration >= timeLeft:
+            if chord.rel == 1 and chord.inversion == 0:
                 points += 2000
             elif chord.rel == 5 and self.chords[beat - 1].rel == 1:
                 points += 1000
@@ -152,6 +159,16 @@ class Score:
         if beat >= self.LENGTH * 4 - 6:
             if chord.rel not in (1, 4, 5):
                 points -= 500
+            if chord.rel in (1, 5):
+                points += 500
+
+        # Rule 7: Halve points for 7th notes because it's way easier to satisfy reqs and we want to avoid them
+        if len(chord.relNotes) == 4:
+            points //= 2
+
+        # Rule 8: Treble and Bass should never cross
+        if currTrebleNote <= noteIdLong:
+            return 0
 
         return points
 
@@ -176,10 +193,10 @@ class Score:
         # Implement V7s later: right now just hardcode V7/V
         # TODO: REPLACE THIS HARDCODED THING WITH ACTUAL DICT KEY IMPLEMENTATION
         chordSet['V7/V'] = ChordFamily('D', 'SEVENTH', self.KEY)
-        chordSet['V7/ii'] = ChordFamily('A', 'SEVENTH', self.KEY)
-        chordSet['V7/IV'] = ChordFamily('C', 'SEVENTH', self.KEY)
-        chordSet['V7/vi'] = ChordFamily('E', 'SEVENTH', self.KEY)
-        chordSet['V7/iii'] = ChordFamily('B', 'SEVENTH', self.KEY)
+        # chordSet['V7/ii'] = ChordFamily('A', 'SEVENTH', self.KEY)
+        # chordSet['V7/IV'] = ChordFamily('C', 'SEVENTH', self.KEY)
+        # chordSet['V7/vi'] = ChordFamily('E', 'SEVENTH', self.KEY)
+        # chordSet['V7/iii'] = ChordFamily('B', 'SEVENTH', self.KEY)
         chordSet['V7'] = ChordFamily('G', 'SEVENTH', self.KEY)
         return chordSet
 
@@ -273,7 +290,11 @@ class Score:
 
     def harmonize(self):
         self.generateChordBank()
+        self.print_score_chordBank()
+        print()
         self.harmonizeBass()
+        print()
+        self.print_score_chords()
 
     def harmonizeBass(self):
         """Adds a bass line to accompany a single note melody"""
@@ -298,34 +319,49 @@ class Score:
                     for relNoteIdShort in chord.relNotes:
                         noteIdShort = (relNoteIdShort + self.KEY_NOTE_ID_SHORT) % 12
                         for noteIdLong in self.getPossibleBassNotes(noteIdShort, beat):
-                            chord.setBaseNote(noteIdLong % 12)
                             points = self.assessFitBassNote(beat, chord, noteIdLong)
                             if points >= mostPoints:
                                 mostPoints = points
                                 bestNoteIdLong = noteIdLong
                                 bestChord = chord
+                                print("BEST: ", beat, points, noteIdLong, chord)
             else:
                 print("No implementation for double notes in melodies yet!!")
                 quit()
 
+            bestChord.setBaseNote(bestNoteIdLong % 12)
             bestNoteLong = Note.getNoteLong(bestNoteIdLong)
+
+            # Calculate new value for disjunct motion
+            if beat > 0:
+                lastBassNoteIdLong = self.score[beat * 4 - 1][BASS_LINE].noteIdLong
+                if abs(bestNoteIdLong - lastBassNoteIdLong) >= 3:
+                    self.bassDisjunctMotion += abs(bestNoteIdLong - lastBassNoteIdLong)
+                elif abs(bestNoteIdLong - lastBassNoteIdLong) in (1, 2):
+                    self.bassDisjunctMotion -= 1
+
             self.add_note(bestNoteLong, 4, 4 * (beat % 4), beat // 4)
             self.chords[beat] = bestChord
+            print(beat, mostPoints, bestNoteIdLong, bestChord, self.bassDisjunctMotion)
+            print('\n')
 
     def print_score(self):
         for i in range(self.LENGTH):
-            for j in range(16):
-                stdout.write(str([str(x) for x in self.score[i * 16 + j]]))
+            for j in range(4):
+                stdout.write(str([str(x) for x in self.score[i * 16 + j * 4]]))
             stdout.write('\n')
 
     def print_score_chords(self):
+
         for i in range(self.LENGTH):
+            stdout.write(str(i * 4) + ":\t")
             for j in range(4):
                 stdout.write(str(self.chords[i * 4 + j]) + '\t')
             stdout.write('\n')
 
     def print_score_chordBank(self):
         for i in range(self.LENGTH * 4):
+            stdout.write(str(i) + ":\t")
             for j in range(len(self.chordBank[i])):
                 stdout.write(str(self.chordBank[i][j]) + '\t')
             stdout.write('\n')
