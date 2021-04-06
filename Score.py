@@ -9,15 +9,34 @@ BASS_LINE = 1
 
 BASS_LOW = Note.getIdLong('C2')
 BASS_HIGH = Note.getIdLong('C4')
-TREBLE_LOW = Note.getIdLong('C2')
-TREBLE_HIGH = Note.getIdLong('C4')
+TREBLE_LOW = Note.getIdLong('C4')
+TREBLE_HIGH = Note.getIdLong('C6')
 
 # Interval constants
 P8, m2, M2, m3, M3, P4, TRITONE, P5, m6, M6, m7, M7 = map(int, range(12))
 
 # Hardcoded valid major chord progressions (key = previous chord, value = set of current chords)
-# TODO: CREATE THE SET OF VIABLE PROGRESSIONS - IGNORE INVERSIONS FOR NOW?
-MAJOR_PROGRESSIONS = [defaultdict() for i in range(1 + Chord.getHash(7, 3, True))]
+# TODO: CREATE THE SET OF VIABLE PROGRESSIONS - IGNORE INVERSIONS FOR NOW
+MAJOR_PROGRESSIONS = defaultdict()
+MP = MAJOR_PROGRESSIONS
+MP['I'] = ['I', 'I6', 'I6-4', 'IV', 'V', 'V6', 'V6-4', 'vii°6', 'V6-5', 'V4-3', 'V4-3/V']
+MP['I6'] = ['I', 'ii6', 'V', 'V6-4', 'vii°6', 'V4-3']
+MP['I6-4'] = ['I', 'I6-4', 'IV6', 'V']
+MP['ii'] = ['V6', 'vii°6', 'V4-3/V']
+MP['ii6'] = ['V', 'V6', 'vii°6', 'V7/V']
+MP['IV'] = ['I6', 'I6-4', 'V', 'V6', 'V6-4', 'vii°6', 'V7/V']
+MP['IV6'] = ['I6-4', 'V6']
+MP['IV6-4'] = ['I', 'vi6', 'V6', 'vii°6']
+MP['V'] = ['I', 'I6', 'V6-4']
+MP['V6'] = ['I', 'vii6']
+MP['V6-4'] = ['I', 'I6', 'vi6', 'V7']
+MP['vi6'] = ['I', 'ii', 'IV6-4']
+MP['vii°6'] = ['I', 'I6', 'I6-4', 'V6-4', 'vi', 'V7']
+MP['V7'] = ['I', 'I6-4']
+MP['V6-5'] = ['I', 'vii°6']
+MP['V4-3'] = ['I', 'I6']
+MP['V4-3/V'] = ['V']
+MP['V7/V'] = ['V6']
 
 
 # for i in range(3):
@@ -117,7 +136,7 @@ class Score:
 
         if lastTrebleNote != 100 and currTrebleNote != 100:
             if lastTrebleNote - lastBassNote == currTrebleNote - noteIdLong:
-                if (lastTrebleNote - lastBassNote) % 12 in (P8, TRITONE):
+                if (lastTrebleNote - lastBassNote) % 12 in (P8, P5, TRITONE):
                     if lastTrebleNote != currTrebleNote:
                         return 0
 
@@ -127,9 +146,10 @@ class Score:
         # Rule 3: Contrary motion is good!
         if lastTrebleNote < currTrebleNote and noteIdLong < lastBassNote \
                 or lastTrebleNote > currTrebleNote and noteIdLong > lastBassNote:
-            points += 40
+            if abs(lastTrebleNote - currTrebleNote <= 4):
+                points += 40
         elif lastTrebleNote == currTrebleNote and lastBassNote == noteIdLong:
-            points += 100
+            points += 200
 
         # Rule 4: Promote disjunct motion!
         # Idea is self.bassDisjunctMotion stores an integer value: the higher it is,
@@ -139,12 +159,23 @@ class Score:
             points += (-10) * (self.bassDisjunctMotion + (abs(noteIdLong - lastBassNote)))
         elif abs(noteIdLong - lastBassNote) in (1, 2):
             points += 10 * (self.bassDisjunctMotion - 2)
+        else:
+            points -= 50
 
         # Rule 5: Give a lot of points for good chord progression!
         lastChord = self.chords[beat - 1]
-        # points += 200 * MAJOR_PROGRESSIONS[lastChord.hash()].get(chord.hash(), 0)
+        if str(chord) in MAJOR_PROGRESSIONS.get(str(lastChord), {}):
+            points += 500
+        elif str(chord) == str(lastChord):
+            if lastTrebleNote == currTrebleNote and lastBassNote == noteIdLong:
+                points += 500
 
-        # Rule 6: End on a good note!
+        # Subrule for 5: Don't use bad chords!
+        if chord.rel == 3 or (chord.rel == 2 and chord.inversion == 2) or (chord.rel == 7 and chord.inversion != 1) \
+                or (chord.rel == 6 and chord.inversion != 1):
+            points -= 500
+
+        # Rule 6: End on a good cadence!
         currTrebleDuration = self.score[beat * 4][MELODY_LINE].duration
         # print(currTrebleDuration)
         timeLeft = (self.LENGTH * 4 - beat)
@@ -156,19 +187,38 @@ class Score:
 
         # Sub rule for 6: don't use certain chords in the last 2 measures to
         # simplify the progressions available
-        if beat >= self.LENGTH * 4 - 6:
-            if chord.rel not in (1, 4, 5):
-                points -= 500
-            if chord.rel in (1, 5):
-                points += 500
+        else:
+            if beat >= self.LENGTH * 4 - 6:
+                if "I" in MP.get(str(chord), {}) and str(chord) not in ("I", "I6"):
+                    points += 500
 
-        # Rule 7: Halve points for 7th notes because it's way easier to satisfy reqs and we want to avoid them
-        if len(chord.relNotes) == 4:
-            points //= 2
-
-        # Rule 8: Treble and Bass should never cross
+        # Rule 7: Treble and Bass should never cross
         if currTrebleNote <= noteIdLong:
             return 0
+
+        # Rule 8: Discourage use of 6/4s
+        if chord.inversion == 2 and not chord.seventh:
+            if chord.rel not in (1, 5):
+                points -= 100
+
+        # Rule 9: Discourage doubling of notes
+        # Also, chords consisting of one note are always in the key of that note,
+        # not some inversion of some other chord
+        if currTrebleNote % 12 == noteIdLong % 12:
+            if chord.inversion != 0:
+                return 0
+            points -= 50
+
+        # Rule 10: Discourage notes that are too high or too low
+        # Note: This rule would be unnecessary in a non-greedy algorithm
+        if noteIdLong < Note.getIdLong('G2'):
+            points -= 20 * (Note.getIdLong('F#2') - noteIdLong + 1)
+        elif noteIdLong > Note.getIdLong('F#3'):
+            points -= 20 * (noteIdLong - Note.getIdLong('F#3') + 1)
+
+        # Rule -1: Halve points for 7th notes because it's way easier to satisfy reqs and we want to avoid them
+        if len(chord.relNotes) == 4:
+            points //= 2
 
         return points
 
@@ -294,7 +344,8 @@ class Score:
         print()
         self.harmonizeBass()
         print()
-        self.print_score_chords()
+        self.mergeBass()
+        self.print_bass_line()
 
     def harmonizeBass(self):
         """Adds a bass line to accompany a single note melody"""
@@ -320,11 +371,11 @@ class Score:
                         noteIdShort = (relNoteIdShort + self.KEY_NOTE_ID_SHORT) % 12
                         for noteIdLong in self.getPossibleBassNotes(noteIdShort, beat):
                             points = self.assessFitBassNote(beat, chord, noteIdLong)
-                            if points >= mostPoints:
+                            print("Points: ", points, Note.getNoteLong(noteIdLong), chord)
+                            if points > mostPoints:
                                 mostPoints = points
                                 bestNoteIdLong = noteIdLong
                                 bestChord = chord
-                                print("BEST: ", beat, points, noteIdLong, chord)
             else:
                 print("No implementation for double notes in melodies yet!!")
                 quit()
@@ -345,6 +396,14 @@ class Score:
             print(beat, mostPoints, bestNoteIdLong, bestChord, self.bassDisjunctMotion)
             print('\n')
 
+    def mergeBass(self):
+        ind = self.LENGTH * 16 - 2
+        while ind >= 0:
+            if self.score[ind][BASS_LINE].noteIdLong == self.score[ind + 1][BASS_LINE].noteIdLong:
+                self.score[ind][BASS_LINE].duration = self.score[ind + 1][BASS_LINE].duration + 1
+                self.score[ind + 1][BASS_LINE].fresh = False
+            ind -= 1
+
     def print_score(self):
         for i in range(self.LENGTH):
             for j in range(4):
@@ -352,7 +411,6 @@ class Score:
             stdout.write('\n')
 
     def print_score_chords(self):
-
         for i in range(self.LENGTH):
             stdout.write(str(i * 4) + ":\t")
             for j in range(4):
@@ -365,6 +423,19 @@ class Score:
             for j in range(len(self.chordBank[i])):
                 stdout.write(str(self.chordBank[i][j]) + '\t')
             stdout.write('\n')
+
+    def print_bass_line(self):
+        for i in range(self.LENGTH):
+            stdout.write(str(self.score[i * 16][BASS_LINE]) + "\t")
+            stdout.write(str(self.score[i * 16][BASS_LINE].duration) + "\t")
+            stdout.write(str(self.score[i * 16 + 4][BASS_LINE]) + "\t")
+            stdout.write(str(self.score[i * 16 + 4][BASS_LINE].duration) + "\t")
+            stdout.write(str(self.score[i * 16 + 8][BASS_LINE]) + "\t")
+            stdout.write(str(self.score[i * 16 + 8][BASS_LINE].duration) + "\t")
+            stdout.write(str(self.score[i * 16 + 12][BASS_LINE]) + "\t")
+            stdout.write(str(self.score[i * 16 + 12][BASS_LINE].duration) + "\t")
+            print()
+
 
     def write_sample(self, voices=1):
         song = [['G4', 4, 0, 0], ['E4', 4, 4, 0], ['D4', 6, 8, 0], ['E4', 2, 14, 0],

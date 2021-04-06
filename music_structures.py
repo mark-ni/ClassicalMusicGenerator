@@ -94,29 +94,6 @@ class Chord:
     def __lt__(self, other):
         return len(self.relNotes) < len(other.relNotes)
 
-    def setBaseNote(self, noteIdShort):
-        noteIdShort = (noteIdShort - Note.getIdShort(self.key[0])) % 12
-        inversion = 0
-        while inversion < len(self.relNotes) and noteIdShort != self.relNotes[inversion]:
-            inversion += 1
-        if inversion == len(self.relNotes):
-            print(str(noteIdShort), str(self.relNotes))
-            print("Chord.setBaseNote: DID NOT FIND INVERSION FOR CHORD")
-            quit()
-        self.inversion = inversion
-        self.baseNoteIdShort = noteIdShort
-
-    def setChild(self):
-        if self.quality in ['MAJOR', 'MAJOR_SEVENTH', 'SEVENTH', 'AUGMENTED']:
-            self.child = self.child.upper()
-        if not self.seventh:
-            return
-        childRel = (self.rel - 5) % 7 + 1
-        baseQuality = self.key[1]
-        intervalQualities = ChordFamily.getIntervalQualities(baseQuality)
-        childQuality = intervalQualities[childRel - 1]
-        self.child = self.getChordString(childRel, childQuality)
-
     def getChordString(self, rel, quality, inversion=-1, seventh=False):
         string = Chord.roman[rel]
         if seventh:
@@ -143,17 +120,50 @@ class Chord:
 
         return string
 
-    def hash(self):
+    def getChordStringInvless(self):
         '''Hashes the chord to later be accessible by a 2D array containing
         valid chord progressions'''
-        return Chord.getHash(self.rel, self.inversion, len(self.relNotes) == 4)
+        string = Chord.roman[self.rel]
+        if self.seventh:
+            string = 'v'
 
-    @staticmethod
-    def getHash(rel, inversion, seventh=False):
-        if not seventh:
-            return (rel - 1) * 3 + inversion
-        else:
-            return 18 + (rel - 1) * 4 + inversion
+        # Account for Key
+        if self.quality.upper() in ['MAJOR', 'MAJOR_SEVENTH', 'SEVENTH']:
+            string = string.upper()
+        elif self.quality.upper() == 'AUGMENTED':
+            string = string.upper()
+            string += '⁺'
+        elif self.quality.upper() in ['DIMINISHED', 'DIMINISHED_SEVENTH']:
+            string += '°'
+
+        # Always use relative dominant 7
+        if self.child.upper() != 'I':
+            string += '/' + self.child
+
+        return string
+
+    def setBaseNote(self, noteIdShort):
+        noteIdShort = (noteIdShort - Note.getIdShort(self.key[0])) % 12
+        inversion = 0
+        while inversion < len(self.relNotes) and noteIdShort != self.relNotes[inversion]:
+            inversion += 1
+        if inversion == len(self.relNotes):
+            print(str(noteIdShort), str(self.relNotes))
+            print("Chord.setBaseNote: DID NOT FIND INVERSION FOR CHORD")
+            quit()
+        self.inversion = inversion
+        self.baseNoteIdShort = noteIdShort
+
+    def setChild(self):
+        if self.quality in ['MAJOR', 'MAJOR_SEVENTH', 'SEVENTH', 'AUGMENTED']:
+            self.child = self.child.upper()
+        if not self.seventh:
+            return
+        childRel = (self.rel - 5) % 7 + 1
+        baseQuality = self.key[1]
+        intervalQualities = ChordFamily.getIntervalQualities(baseQuality)
+        childQuality = intervalQualities[childRel - 1]
+        self.child = self.getChordString(childRel, childQuality)
 
 
 class ChordFamily:
